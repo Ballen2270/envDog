@@ -5,6 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
+const YAML_DUMP_OPTIONS = {
+  lineWidth: -1,
+  noRefs: true
+};
+
 /**
  * 根据文件扩展名加载配置文件
  * @param {string} filePath - 文件路径
@@ -28,6 +33,13 @@ function loadConfigByExt(filePath) {
 function parseYamlFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return yaml.load(fs.readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * 序列化 YAML 内容（统一输出选项，避免长 URL 折叠与字符串样式不一致）
+ */
+function dumpYamlContent(data) {
+  return yaml.dump(data, YAML_DUMP_OPTIONS);
 }
 
 /**
@@ -93,6 +105,7 @@ function setNestedValue(obj, key, value) {
 module.exports = {
   loadConfigByExt,
   parseYamlFile,
+  dumpYamlContent,
   parsePropertiesFile,
   extractAllKeys,
   getNestedValue,

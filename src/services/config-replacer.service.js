@@ -3,8 +3,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
-const { loadConfigByExt, parseYamlFile, parsePropertiesFile, getNestedValue, setNestedValue } = require('../core/config-parser');
+const { parseYamlFile, dumpYamlContent, getNestedValue, setNestedValue } = require('../core/config-parser');
 const { resolveVarName } = require('../core/naming');
 
 /**
@@ -44,7 +43,7 @@ function replaceYamlValues(filePath, varMappings, profile, mode) {
   }
 
   if (modified) {
-    fs.writeFileSync(filePath, yaml.dump(config), 'utf-8');
+    fs.writeFileSync(filePath, dumpYamlContent(config), 'utf-8');
     console.log(`已替换: ${path.basename(filePath)}`);
   }
 }
