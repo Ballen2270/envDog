@@ -552,4 +552,4 @@ spring:
 
 - `commander` - CLI 参数解析
 - `inquirer` - 交互式 prompts
-- `js-yaml` - YAML 解析
+- `yaml` - YAML 解析与保真编辑

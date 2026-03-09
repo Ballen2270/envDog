@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { ENV_DOG_DIR } = require('../constants');
 const { resolveVarName } = require('../core/naming');
+const { parseYamlDocument, getScalarSnapshot } = require('../core/yaml-doc');
 
 const MANIFEST_FILE = '.envdog/manifest.json';
 
@@ -28,17 +29,34 @@ function createManifest(template, resourcesDir, options = {}) {
   for (const [file, fileConfig] of Object.entries(template.files || {})) {
     const profile = fileConfig.profile || 'default';
     const filePath = path.join(resourcesDir, file);
+    const ext = path.extname(file).toLowerCase();
 
     // 读取原始配置文件获取实际值
     if (!fs.existsSync(filePath)) continue;
 
-    const config = loadConfigByExt(filePath);
-    if (!config) continue;
+    let config = null;
+    let yamlDoc = null;
+    if (ext === '.yml' || ext === '.yaml') {
+      const yamlContent = fs.readFileSync(filePath, 'utf-8');
+      yamlDoc = parseYamlDocument(yamlContent);
+    } else {
+      config = loadConfigByExt(filePath);
+      if (!config) continue;
+    }
 
     // 遍历该文件的敏感键
     for (const key of fileConfig.keys || []) {
-      const value = getNestedValue(config, key);
-      if (value === null || value === undefined) continue;
+      let value;
+      let originalStyle;
+      if (yamlDoc !== null) {
+        const scalar = getScalarSnapshot(yamlDoc, key);
+        if (!scalar) continue;
+        value = scalar.value;
+        originalStyle = scalar.style;
+      } else {
+        value = getNestedValue(config, key);
+        if (value === null || value === undefined) continue;
+      }
 
       const varMappings = template.varMappings || {};
       const envVar = varMappings[key];
@@ -50,12 +68,15 @@ function createManifest(template, resourcesDir, options = {}) {
         seenMappingKeys.add(mappingKey);
 
         const placeholderPattern = `\${${varName}}`;
-        let originalValue = value;
+        let originalValue = String(value);
         const existingMapping = existingMappingMap.get(mappingKey);
 
         // 已被替换为占位符时，优先保留旧 manifest 里的明文，避免重复 replace 导致明文丢失
         if (isPlaceholderValue(value) && existingMapping && !isPlaceholderValue(existingMapping.originalValue)) {
           originalValue = existingMapping.originalValue;
+          if (existingMapping.originalStyle !== undefined) {
+            originalStyle = existingMapping.originalStyle;
+          }
         }
 
         mappings.push({
@@ -64,6 +85,7 @@ function createManifest(template, resourcesDir, options = {}) {
           varName: varName,
           placeholderPattern: placeholderPattern,
           originalValue: originalValue,
+          originalStyle: originalStyle,
           profile: profile
         });
       }

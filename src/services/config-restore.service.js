@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const manifestService = require('./manifest.service');
 const backupService = require('./backup.service');
+const { parseYamlDocument, getScalarSnapshot, setScalarValue, stringifyDocument } = require('../core/yaml-doc');
 
 /**
  * 还原配置值：将 ${VAR_NAME} 替换为原始明文值
@@ -161,21 +162,22 @@ function protectConfigValues(env, resourcesDir, options = {}) {
  * 还原 YAML 文件中的值
  */
 function restoreYamlValues(filePath, mappings) {
-  let content = fs.readFileSync(filePath, 'utf-8');
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const doc = parseYamlDocument(content);
   let modified = false;
 
   for (const m of mappings) {
-    const replaced = replaceYamlPathValue(content, m.keyPath, m.originalValue, {
-      shouldReplace: (currentValue) => currentValue !== m.originalValue
-    });
-    if (replaced.modified) {
-      content = replaced.content;
+    const targetValue = String(m.originalValue);
+    const snapshot = getScalarSnapshot(doc, m.keyPath);
+    if (snapshot && snapshot.value !== targetValue) {
+      const style = m.originalStyle || null;
+      setScalarValue(doc, m.keyPath, targetValue, style);
       modified = true;
     }
   }
 
   if (modified) {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    fs.writeFileSync(filePath, stringifyDocument(doc), 'utf-8');
   }
   return modified;
 }
@@ -184,150 +186,22 @@ function restoreYamlValues(filePath, mappings) {
  * 保护 YAML 文件中的值
  */
 function protectYamlValues(filePath, mappings) {
-  let content = fs.readFileSync(filePath, 'utf-8');
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const doc = parseYamlDocument(content);
   let modified = false;
 
   for (const m of mappings) {
-    const replaced = replaceYamlPathValue(content, m.keyPath, m.placeholderPattern, {
-      shouldReplace: (currentValue) => currentValue !== m.placeholderPattern
-    });
-    if (replaced.modified) {
-      content = replaced.content;
+    const snapshot = getScalarSnapshot(doc, m.keyPath);
+    if (snapshot && snapshot.value !== m.placeholderPattern) {
+      setScalarValue(doc, m.keyPath, m.placeholderPattern);
       modified = true;
     }
   }
 
   if (modified) {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    fs.writeFileSync(filePath, stringifyDocument(doc), 'utf-8');
   }
   return modified;
-}
-
-/**
- * 在 YAML 文本中按 keyPath 精确替换值，尽量保留空行/注释/原始格式
- * @param {string} content
- * @param {string} keyPath
- * @param {string} newValue
- * @param {object} options
- * @param {(currentValue: string) => boolean} options.shouldReplace
- * @returns {{content: string, modified: boolean}}
- */
-function replaceYamlPathValue(content, keyPath, newValue, options = {}) {
-  const lines = content.split('\n');
-  const entries = buildYamlPathIndex(lines);
-  const target = entries.find(e => e.path === keyPath);
-  if (!target) return { content, modified: false };
-
-  const line = lines[target.lineIndex];
-  const match = line.match(/^(\s*(?:-\s*)?[^:#]+:\s*)(.*)$/);
-  if (!match) return { content, modified: false };
-
-  const prefix = match[1];
-  const tail = match[2];
-  const { valuePart, commentPart } = splitYamlValueAndComment(tail);
-  const leadingSpaces = (valuePart.match(/^\s*/) || [''])[0];
-  const trailingSpaces = (valuePart.match(/\s*$/) || [''])[0];
-  const currentToken = valuePart.trim();
-  const currentValue = normalizeYamlScalar(currentToken);
-
-  const shouldReplace = options.shouldReplace || (() => true);
-  if (!shouldReplace(currentValue)) {
-    return { content, modified: false };
-  }
-
-  const rendered = renderYamlScalarLike(currentToken, newValue);
-  lines[target.lineIndex] = `${prefix}${leadingSpaces}${rendered}${trailingSpaces}${commentPart}`;
-  return { content: lines.join('\n'), modified: true };
-}
-
-/**
- * 为 YAML 行建立 path 索引（基于缩进层级）
- */
-function buildYamlPathIndex(lines) {
-  const stack = [];
-  const entries = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const parsed = parseYamlKeyLine(lines[i]);
-    if (!parsed) continue;
-
-    while (stack.length > 0 && parsed.indent <= stack[stack.length - 1].indent) {
-      stack.pop();
-    }
-
-    stack.push({ key: parsed.key, indent: parsed.indent });
-    entries.push({ path: stack.map(s => s.key).join('.'), lineIndex: i });
-  }
-
-  return entries;
-}
-
-function parseYamlKeyLine(line) {
-  const match = line.match(/^(\s*)(?:-\s*)?([^:#][^:]*?)\s*:\s*(.*)$/);
-  if (!match) return null;
-
-  const key = stripOuterQuotes(match[2].trim());
-  if (!key) return null;
-
-  return {
-    indent: match[1].length,
-    key: key
-  };
-}
-
-function splitYamlValueAndComment(valueAndComment) {
-  let inSingle = false;
-  let inDouble = false;
-
-  for (let i = 0; i < valueAndComment.length; i++) {
-    const ch = valueAndComment[i];
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle;
-      continue;
-    }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble;
-      continue;
-    }
-    if (ch === '#' && !inSingle && !inDouble) {
-      return {
-        valuePart: valueAndComment.slice(0, i),
-        commentPart: valueAndComment.slice(i)
-      };
-    }
-  }
-
-  return { valuePart: valueAndComment, commentPart: '' };
-}
-
-function normalizeYamlScalar(token) {
-  const t = token.trim();
-  if (!t) return '';
-  if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) {
-    return stripOuterQuotes(t);
-  }
-  return t;
-}
-
-function renderYamlScalarLike(currentToken, rawValue) {
-  const t = currentToken.trim();
-  if (t.startsWith("'") && t.endsWith("'")) {
-    return `'${String(rawValue).replace(/'/g, "''")}'`;
-  }
-  if (t.startsWith('"') && t.endsWith('"')) {
-    return `"${String(rawValue).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-  }
-  return String(rawValue);
-}
-
-function stripOuterQuotes(value) {
-  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1).replace(/''/g, "'");
-  }
-  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-  }
-  return value;
 }
 
 /**

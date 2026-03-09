@@ -3,7 +3,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { parseYamlFile, dumpYamlContent, getNestedValue, setNestedValue } = require('../core/config-parser');
+const { parseYamlDocument, getScalarSnapshot, setScalarValue, stringifyDocument } = require('../core/yaml-doc');
 const { resolveVarName } = require('../core/naming');
 
 /**
@@ -29,21 +29,22 @@ function replaceConfigValuesV2(template, resourcesDir, varMappings, mode) {
  * 替换 YAML 文件中的敏感值
  */
 function replaceYamlValues(filePath, varMappings, profile, mode) {
-  const config = parseYamlFile(filePath);
-  if (!config) return;
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const doc = parseYamlDocument(content);
 
   let modified = false;
   for (const [configKey, envVar] of Object.entries(varMappings)) {
-    const value = getNestedValue(config, configKey);
-    if (value !== null && value !== undefined) {
-      const varName = resolveVarName(configKey, envVar, profile, mode);
-      setNestedValue(config, configKey, `\${${varName}}`);
+    const varName = resolveVarName(configKey, envVar, profile, mode);
+    const placeholder = `\${${varName}}`;
+    const snapshot = getScalarSnapshot(doc, configKey);
+    if (snapshot && snapshot.value !== placeholder) {
+      setScalarValue(doc, configKey, placeholder);
       modified = true;
     }
   }
 
   if (modified) {
-    fs.writeFileSync(filePath, dumpYamlContent(config), 'utf-8');
+    fs.writeFileSync(filePath, stringifyDocument(doc), 'utf-8');
     console.log(`已替换: ${path.basename(filePath)}`);
   }
 }
