@@ -1,0 +1,20 @@
+{
+  "name": "envdog",
+  "version": "1.0.0",
+  "description": "ENV DOG 配置敏感信息管理工具",
+  "main": "envdog.js",
+  "bin": {
+    "envdog": "./envdog.js"
+  },
+  "scripts": {
+    "env:generate": "node envdog.js generate",
+    "env:clear-backups": "node envdog.js clear-backups"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "dotenv": "^16.4.0",
+    "inquirer": "^8.2.7",
+    "js-yaml": "^4.1.0",
+    "properties-reader": "^2.3.0"
+  }
+}

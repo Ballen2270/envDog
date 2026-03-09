@@ -1,0 +1,266 @@
+/**
+ * 配置还原/保护服务模块
+ * 负责将 ${VAR_NAME} 占位符与明文值之间的互相转换
+ */
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
+const { getNestedValue, setNestedValue, parseYamlFile, parsePropertiesFile } = require('../core/config-parser');
+const manifestService = require('./manifest.service');
+const backupService = require('./backup.service');
+
+/**
+ * 还原配置值：将 ${VAR_NAME} 替换为原始明文值
+ * @param {string|null} env - 指定环境，null 表示全部
+ * @param {string} resourcesDir - 资源目录
+ * @param {object} options - 选项 { dryRun: boolean }
+ * @returns {object} 操作结果
+ */
+function restoreConfigValues(env, resourcesDir, options = {}) {
+  const manifest = manifestService.loadManifest();
+  if (!manifest) {
+    throw new Error('manifest.json 不存在，请先运行 "envdog generate --replace"');
+  }
+
+  const mappings = manifestService.getMappingsByEnv(env);
+  if (mappings.length === 0) {
+    return { success: true, message: '没有需要还原的配置' };
+  }
+
+  const results = { restored: [], skipped: [], errors: [] };
+
+  // 按文件分组处理
+  const fileMappings = {};
+  for (const m of mappings) {
+    if (!fileMappings[m.file]) fileMappings[m.file] = [];
+    fileMappings[m.file].push(m);
+  }
+
+  for (const [file, fileMappingsList] of Object.entries(fileMappings)) {
+    const filePath = path.join(resourcesDir, file);
+    if (!fs.existsSync(filePath)) {
+      results.errors.push(`文件不存在: ${file}`);
+      continue;
+    }
+
+    const ext = path.extname(file).toLowerCase();
+
+    if (options.dryRun) {
+      // 预览模式
+      console.log(`\n[预览] ${file}:`);
+      for (const m of fileMappingsList) {
+        console.log(`  ${m.placeholderPattern} → ${m.originalValue}`);
+      }
+      const willModify = fileMappingsList.some(m => m.originalValue !== m.placeholderPattern);
+      if (willModify) {
+        results.restored.push(file);
+      } else {
+        results.skipped.push(file);
+      }
+      continue;
+    }
+
+    try {
+      // 备份当前文件
+      backupService.backupSingleFile(file, resourcesDir);
+
+      let modified = false;
+      if (ext === '.yml' || ext === '.yaml') {
+        modified = restoreYamlValues(filePath, fileMappingsList);
+      } else if (ext === '.properties') {
+        modified = restorePropertiesValues(filePath, fileMappingsList);
+      }
+
+      if (modified) {
+        console.log(`已还原: ${file}`);
+        results.restored.push(file);
+      } else {
+        console.log(`已跳过: ${file} (无可还原明文)`);
+        results.skipped.push(file);
+      }
+    } catch (e) {
+      results.errors.push(`处理 ${file} 失败: ${e.message}`);
+    }
+  }
+
+  // 更新 manifest 状态
+  if (!options.dryRun && results.errors.length === 0) {
+    manifestService.updateStatus('restored');
+  }
+
+  return results;
+}
+
+/**
+ * 保护配置值：将明文值替换为 ${VAR_NAME} 占位符
+ * @param {string|null} env - 指定环境，null 表示全部
+ * @param {string} resourcesDir - 资源目录
+ * @param {object} options - 选项 { dryRun: boolean }
+ * @returns {object} 操作结果
+ */
+function protectConfigValues(env, resourcesDir, options = {}) {
+  const manifest = manifestService.loadManifest();
+  if (!manifest) {
+    throw new Error('manifest.json 不存在，请先运行 "envdog generate --replace"');
+  }
+
+  const mappings = manifestService.getMappingsByEnv(env);
+  if (mappings.length === 0) {
+    return { success: true, message: '没有需要保护的配置' };
+  }
+
+  const results = { protected: [], skipped: [], errors: [] };
+
+  // 按文件分组处理
+  const fileMappings = {};
+  for (const m of mappings) {
+    if (!fileMappings[m.file]) fileMappings[m.file] = [];
+    fileMappings[m.file].push(m);
+  }
+
+  for (const [file, fileMappingsList] of Object.entries(fileMappings)) {
+    const filePath = path.join(resourcesDir, file);
+    if (!fs.existsSync(filePath)) {
+      results.errors.push(`文件不存在: ${file}`);
+      continue;
+    }
+
+    const ext = path.extname(file).toLowerCase();
+
+    if (options.dryRun) {
+      // 预览模式
+      console.log(`\n[预览] ${file}:`);
+      for (const m of fileMappingsList) {
+        console.log(`  ${m.originalValue} → ${m.placeholderPattern}`);
+      }
+      results.protected.push(file);
+      continue;
+    }
+
+    try {
+      if (ext === '.yml' || ext === '.yaml') {
+        protectYamlValues(filePath, fileMappingsList);
+      } else if (ext === '.properties') {
+        protectPropertiesValues(filePath, fileMappingsList);
+      }
+
+      console.log(`已保护: ${file}`);
+      results.protected.push(file);
+    } catch (e) {
+      results.errors.push(`处理 ${file} 失败: ${e.message}`);
+    }
+  }
+
+  // 更新 manifest 状态
+  if (!options.dryRun && results.errors.length === 0) {
+    manifestService.updateStatus('protected');
+  }
+
+  return results;
+}
+
+/**
+ * 还原 YAML 文件中的值
+ */
+function restoreYamlValues(filePath, mappings) {
+  const config = parseYamlFile(filePath);
+  if (!config) return false;
+
+  let modified = false;
+  for (const m of mappings) {
+    const currentValue = getNestedValue(config, m.keyPath);
+    if (currentValue !== null && currentValue !== undefined) {
+      // 检查是否已经是明文值（幂等性检查）
+      if (currentValue !== m.originalValue) {
+        setNestedValue(config, m.keyPath, m.originalValue);
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    fs.writeFileSync(filePath, yaml.dump(config), 'utf-8');
+  }
+  return modified;
+}
+
+/**
+ * 保护 YAML 文件中的值
+ */
+function protectYamlValues(filePath, mappings) {
+  const config = parseYamlFile(filePath);
+  if (!config) return false;
+
+  let modified = false;
+  for (const m of mappings) {
+    const currentValue = getNestedValue(config, m.keyPath);
+    if (currentValue !== null && currentValue !== undefined) {
+      // 检查是否已经是占位符（幂等性检查）
+      if (currentValue !== m.placeholderPattern) {
+        setNestedValue(config, m.keyPath, m.placeholderPattern);
+        modified = true;
+      }
+    }
+  }
+
+  if (modified) {
+    fs.writeFileSync(filePath, yaml.dump(config), 'utf-8');
+  }
+  return modified;
+}
+
+/**
+ * 还原 Properties 文件中的值
+ */
+function restorePropertiesValues(filePath, mappings) {
+  let content = fs.readFileSync(filePath, 'utf-8');
+  let modified = false;
+
+  for (const m of mappings) {
+    // 匹配 key = ${VAR_NAME} 或 key: ${VAR_NAME}
+    const regex = new RegExp(`^(${escapeRegExp(m.keyPath.replace(/\\./g, '\\.'))})\\s*[:=]\\s*${escapeRegExp(m.placeholderPattern)}\\s*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `$1=${m.originalValue}`);
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    fs.writeFileSync(filePath, content, 'utf-8');
+  }
+  return modified;
+}
+
+/**
+ * 保护 Properties 文件中的值
+ */
+function protectPropertiesValues(filePath, mappings) {
+  let content = fs.readFileSync(filePath, 'utf-8');
+  let modified = false;
+
+  for (const m of mappings) {
+    // 匹配 key = value
+    const regex = new RegExp(`^(${escapeRegExp(m.keyPath.replace(/\\./g, '\\.'))})\\s*[:=]\\s*(.+?)\\s*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `$1=${m.placeholderPattern}`);
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    fs.writeFileSync(filePath, content, 'utf-8');
+  }
+  return modified;
+}
+
+/**
+ * 转义正则表达式特殊字符
+ */
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+module.exports = {
+  restoreConfigValues,
+  protectConfigValues
+};
