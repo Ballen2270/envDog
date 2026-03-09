@@ -9,7 +9,7 @@ const DEFAULT_RESOURCES_DIR = './src/main/resources';
 
 const DEFAULT_SENSITIVE_KEYS = [
   'password', 'pwd', 'secret', 'key', 'token',
-  'credential', 'username', 'user', 'url'
+  'credential', 'username', 'user', 'url', 'host'
 ];
 
 module.exports = {

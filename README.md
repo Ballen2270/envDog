@@ -294,7 +294,7 @@ envdog 使用 `manifest.json` 记录替换映射关系，确保还原和保护�
 {
   "name": "default",
   "version": "2.0",
-  "sensitiveKeys": ["password", "pwd", "secret", "key", "token", "credential", "username", "user", "url"],
+  "sensitiveKeys": ["password", "pwd", "secret", "key", "token", "credential", "username", "user", "url", "host"],
   "generatedAt": "2026-03-09T10:00:00.000Z",
   "files": {
     "application.yml": {
