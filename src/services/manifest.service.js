@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ENV_DOG_DIR } = require('../constants');
+const { resolveVarName } = require('../core/naming');
 
 const MANIFEST_FILE = '.envdog/manifest.json';
 
@@ -20,6 +21,7 @@ function createManifest(template, resourcesDir, options = {}) {
   const mappings = [];
   const seenMappingKeys = new Set();
   const existingManifest = options.existingManifest || loadManifest();
+  const mode = options.mode || 'single';
   const existingMappingMap = buildExistingMappingMap(existingManifest);
 
   // 遍历模板中的文件配置
@@ -40,7 +42,7 @@ function createManifest(template, resourcesDir, options = {}) {
 
       const varMappings = template.varMappings || {};
       const envVar = varMappings[key];
-      const varName = envVar?.[profile];
+      const varName = resolveVarName(key, envVar, profile, mode);
 
       if (varName) {
         const mappingKey = `${file}::${profile}::${key}`;

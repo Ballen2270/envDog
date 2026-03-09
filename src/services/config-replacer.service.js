@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const { loadConfigByExt, parseYamlFile, parsePropertiesFile, getNestedValue, setNestedValue } = require('../core/config-parser');
-const { generateVarName } = require('../core/naming');
+const { resolveVarName } = require('../core/naming');
 
 /**
  * 替换配置文件中的敏感值
@@ -37,7 +37,7 @@ function replaceYamlValues(filePath, varMappings, profile, mode) {
   for (const [configKey, envVar] of Object.entries(varMappings)) {
     const value = getNestedValue(config, configKey);
     if (value !== null && value !== undefined) {
-      let varName = envVar[profile] || generateVarName(configKey, profile, mode);
+      const varName = resolveVarName(configKey, envVar, profile, mode);
       setNestedValue(config, configKey, `\${${varName}}`);
       modified = true;
     }
@@ -59,7 +59,7 @@ function replacePropertiesValues(filePath, varMappings, profile, mode) {
   for (const [configKey, envVar] of Object.entries(varMappings)) {
     const regex = new RegExp(`^(${configKey.replace(/\./g, '\\.')})\\s*=\\s*(.+)$`, 'm');
     if (regex.test(content)) {
-      const varName = envVar[profile] || generateVarName(configKey, profile, mode);
+      const varName = resolveVarName(configKey, envVar, profile, mode);
       content = content.replace(regex, `$1=\${${varName}}`);
       console.log(`已替换: ${path.basename(filePath)} 中的 ${configKey}`);
       modified = true;

@@ -117,7 +117,7 @@ program
       if (options.replace) {
         // 先生成明文快照 manifest，再执行 replace，避免原始值被占位符覆盖
         console.log('\n=== 生成 manifest ===\n');
-        const manifest = manifestService.createManifest(template, resourcesDir);
+        const manifest = manifestService.createManifest(template, resourcesDir, { mode: options.mode });
         manifestService.saveManifest(manifest);
         console.log('manifest.json 已生成');
 

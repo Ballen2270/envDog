@@ -3,7 +3,7 @@
  */
 const path = require('path');
 const { loadConfigByExt, getNestedValue } = require('../core/config-parser');
-const { generateVarName } = require('../core/naming');
+const { resolveVarName } = require('../core/naming');
 const { writeEnvFile } = require('../core/env-file');
 
 /**
@@ -18,12 +18,8 @@ function extractSensitiveDataV2(filePath, keys, varMappings, profile, singleMode
   for (const key of keys) {
     const value = getNestedValue(config, key);
     if (value !== null && value !== undefined) {
-      let envVar;
-      if (singleMode && profile !== 'default') {
-        envVar = varMappings[key]?.[profile] || generateVarName(key, profile, 'single');
-      } else {
-        envVar = varMappings[key]?.[profile] || generateVarName(key, profile, 'multi');
-      }
+      const mode = singleMode ? 'single' : 'multi';
+      const envVar = resolveVarName(key, varMappings[key], profile, mode);
       result[envVar] = String(value);
     }
   }
@@ -115,19 +111,8 @@ function generateEnvModeSingle(template, resourcesDir, varMappings) {
     const profile = config.profile || 'default';
     const data = extractSensitiveDataV2(filePath, config.keys, varMappings, profile, true);
 
-    // single 模式加前缀
-    if (profile !== 'default') {
-      const prefix = profile.toUpperCase();
-      const prefixedData = {};
-      for (const [key, value] of Object.entries(data)) {
-        prefixedData[`${prefix}_${key}`] = value;
-      }
-      Object.assign(allData, prefixedData);
-      envInfo[profile] = Object.keys(prefixedData);
-    } else {
-      Object.assign(allData, data);
-      envInfo[profile] = Object.keys(data);
-    }
+    Object.assign(allData, data);
+    envInfo[profile] = Object.keys(data);
   }
 
   if (Object.keys(allData).length > 0) {
