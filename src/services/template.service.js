@@ -3,11 +3,11 @@
  */
 const fs = require('fs');
 const path = require('path');
-const inquirer = require('inquirer');
 const { TEMPLATE_DIR, DEFAULT_TEMPLATE_NAME, DEFAULT_SENSITIVE_KEYS } = require('../constants');
 const { scanConfigFiles, extractProfileFromFileName, extractSensitiveKeysFromFile } = require('../core/file-discovery');
 const configParser = require('../core/config-parser');
 const { generateVarName } = require('../core/naming');
+const { promptWithEscCancel } = require('../core/prompt');
 
 /**
  * 保存模板
@@ -56,7 +56,7 @@ async function promptUserSelectFiles(files) {
     checked: true
   }));
 
-  const answers = await inquirer.prompt([
+  const answers = await promptWithEscCancel([
     {
       type: 'checkbox',
       name: 'selectedFiles',
@@ -82,7 +82,7 @@ async function promptUserConfirmKeys(fileKeysMap, sensitiveKeys) {
     checked: true
   }));
 
-  const answers = await inquirer.prompt([
+  const answers = await promptWithEscCancel([
     {
       type: 'checkbox',
       name: 'selectedKeys',
