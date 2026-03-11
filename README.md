@@ -187,8 +187,11 @@ envdog restore [options]
 | 选项 | 简写 | 说明 | 默认值 |
 |------|------|------|--------|
 | `--env <env>` | `-e` | 指定环境（与 profile 一致，例如 dev/test/prod） | 全部环境 |
+| `--file <file>` | `-f` | 指定文件（如 application-dev.yml），自动从文件名解析 profile | - |
 | `--dir <path>` | `-d` | 资源目录路径 | ./src/main/resources |
 | `--dry-run` | - | 预览模式，不实际修改 | false |
+
+**注意**：`--env` 和 `--file` 不能同时使用。
 
 **示例：**
 
@@ -198,6 +201,9 @@ envdog restore
 
 # 仅还原 dev 环境
 envdog restore --env dev
+
+# 指定文件还原（自动解析 profile：application-dev.yml → dev）
+envdog restore --file application-dev.yml
 
 # 预览还原效果（不实际修改）
 envdog restore --dry-run
@@ -218,8 +224,11 @@ envdog protect [options]
 | 选项 | 简写 | 说明 | 默认值 |
 |------|------|------|--------|
 | `--env <env>` | `-e` | 指定环境（与 profile 一致，例如 dev/test/prod） | 全部环境 |
+| `--file <file>` | `-f` | 指定文件（如 application-dev.yml），自动从文件名解析 profile | - |
 | `--dir <path>` | `-d` | 资源目录路径 | ./src/main/resources |
 | `--dry-run` | - | 预览模式，不实际修改 | false |
+
+**注意**：`--env` 和 `--file` 不能同时使用。
 
 **示例：**
 
@@ -230,9 +239,61 @@ envdog protect
 # 仅保护 dev 环境
 envdog protect --env dev
 
+# 指定文件保护（自动解析 profile：application-prod.yml → prod）
+envdog protect --file application-prod.yml
+
 # 预览保护效果（不实际修改）
 envdog protect --dry-run
 ```
+
+---
+
+### envdog exec
+
+安全加载 `.env` 变量并执行命令，解决 `source .env` 时特殊字符（如 `&`）报错的问题。
+
+```bash
+envdog exec [options] -- <command>
+```
+
+**选项：**
+
+| 选项 | 简写 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--env-file <path>` | `-e` | 指定 .env 文件路径 | .env |
+| `--verbose` | - | 输出变量列表（脱敏） | false |
+| `--dry-run` | - | 预览模式，不实际执行 | false |
+
+**使用场景：**
+
+当 MySQL 等数据库 URL 包含 `&` 字符时，直接 `source .env` 会报错：
+```
+.env:2: parse error near `&'
+```
+
+使用 `envdog exec` 可以安全加载变量并执行命令：
+
+```bash
+# 原始方式（可能报错）
+source .env && mvn mybatis-generator:generate
+
+# 使用 envdog exec（安全）
+envdog exec -- mvn mybatis-generator:generate
+
+# 指定环境文件
+envdog exec -e .env-dev -- mvn mybatis-generator:generate
+
+# 预览模式
+envdog exec --dry-run -- echo $DATASOURCE_URL
+```
+
+**工作原理：**
+
+1. 读取 `.env` 文件
+2. 将变量注入子进程环境（不生成临时脚本）
+3. 执行用户命令
+4. 简单安全过滤：拦截常见提权/删除类命令及 `; & |` 这类链式符号
+
 
 ---
 
@@ -248,6 +309,8 @@ envdog generate --replace
 
 # 2. 提交代码前：还原明文值以便本地运行测试
 envdog restore --env dev
+# 或使用 --file 指定文件
+envdog restore --file application-dev.yml
 # 输出: application-dev.yml 已还原为明文值
 
 # 3. 运行测试/启动应用
@@ -258,6 +321,8 @@ git add . && git commit -m "feat: add new feature"
 
 # 5. 提交完成后：重新保护敏感值
 envdog protect --env dev
+# 或使用 --file 指定文件
+envdog protect --file application-dev.yml
 # 输出: application-dev.yml 已恢复为占位符
 
 # 6. 查看状态
@@ -524,6 +589,19 @@ spring:
 6. **使用还原/保护工作流**：提交代码前使用 `restore`，提交后使用 `protect`
 
 7. **使用预览模式**：不确定效果时，先用 `--dry-run` 预览
+
+---
+
+## 更新记录
+
+### 2026-03-11
+
+- `restore` 和 `protect` 命令新增 `--file` 参数，支持按文件名过滤
+- `--file` 自动从文件名解析 profile（如 `application-dev.yml` → `dev`）
+- `--env` 和 `--file` 互斥，不能同时使用
+- `envdog exec` 改为直接注入子进程环境执行，不再生成临时脚本
+- `exec` 新增基础安全过滤，拦截常见危险命令与链式符号 `; & |`
+- 移除可 source 的 `.env.sh` 生成支持
 
 ---
 

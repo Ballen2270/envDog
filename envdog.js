@@ -28,6 +28,7 @@ const backupService = require('./src/services/backup.service');
 const configReplacer = require('./src/services/config-replacer.service');
 const manifestService = require('./src/services/manifest.service');
 const configRestore = require('./src/services/config-restore.service');
+const execService = require('./src/services/exec.service');
 
 const program = new Command();
 
@@ -436,17 +437,24 @@ program
 program
   .command('restore')
   .description('从 .env 文件还原明文值到配置文件')
-  .option('-e, --env <env>', '指定环境 (dev, test, pro)')
+  .option('-e, --env <env>', '指定环境 (dev, test, prod)')
+  .option('-f, --file <file>', '指定文件 (如 application-dev.yml)')
   .option('-d, --dir <path>', '资源目录路径', DEFAULT_RESOURCES_DIR)
   .option('--dry-run', '预览模式，不实际修改', false)
   .action((options) => {
     console.log('\n=== 还原配置文件 ===\n');
 
+    // 校验 --env 和 --file 互斥
+    if (options.env && options.file) {
+      console.error('错误: --file 和 --env 不能同时使用');
+      process.exit(1);
+    }
+
     try {
       const results = configRestore.restoreConfigValues(
         options.env || null,
         options.dir,
-        { dryRun: options.dryRun }
+        { dryRun: options.dryRun, file: options.file || null }
       );
 
       if (results.restored && results.restored.length > 0) {
@@ -473,17 +481,24 @@ program
 program
   .command('protect')
   .description('将配置文件中的明文值重新替换为环境变量占位符')
-  .option('-e, --env <env>', '指定环境 (dev, test, pro)')
+  .option('-e, --env <env>', '指定环境 (dev, test, prod)')
+  .option('-f, --file <file>', '指定文件 (如 application-dev.yml)')
   .option('-d, --dir <path>', '资源目录路径', DEFAULT_RESOURCES_DIR)
   .option('--dry-run', '预览模式，不实际修改', false)
   .action((options) => {
     console.log('\n=== 保护配置文件 ===\n');
 
+    // 校验 --env 和 --file 互斥
+    if (options.env && options.file) {
+      console.error('错误: --file 和 --env 不能同时使用');
+      process.exit(1);
+    }
+
     try {
       const results = configRestore.protectConfigValues(
         options.env || null,
         options.dir,
-        { dryRun: options.dryRun }
+        { dryRun: options.dryRun, file: options.file || null }
       );
 
       if (results.protected && results.protected.length > 0) {
@@ -559,6 +574,39 @@ program
     }
 
     console.log('');
+  });
+
+// ============================================================
+// 命令: exec
+// ============================================================
+program
+  .command('exec [args...]')
+  .description('安全加载 .env 变量并执行命令（解决 source .env 时 & 字符报错问题）')
+  .option('-e, --env-file <path>', '指定 .env 文件路径', '.env')
+  .option('--verbose', '输出变量列表（脱敏）')
+  .option('--dry-run', '预览模式，不实际执行')
+  .action(async (args, options) => {
+    const envFilePath = options.envFile || '.env';
+    const command = args.join(' ');
+
+    if (!command) {
+      console.error('错误: 请指定要执行的命令');
+      console.log('用法: envdog exec -- <command>');
+      console.log('示例: envdog exec -- mvn mybatis-generator:generate');
+      process.exit(1);
+    }
+
+    try {
+      if (options.dryRun) {
+        execService.execWithEnvDryRun(command, envFilePath, { verbose: !!options.verbose });
+      } else {
+        const exitCode = await execService.execWithEnv(command, envFilePath, { verbose: !!options.verbose });
+        process.exit(exitCode);
+      }
+    } catch (error) {
+      console.error('错误:', error.message);
+      process.exit(1);
+    }
   });
 
 // ============================================================

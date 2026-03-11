@@ -58,9 +58,7 @@ function generateEnvModeMulti(template, resourcesDir, varMappings) {
 
   if (Object.keys(sharedData).length > 0) {
     const keys = Object.keys(sharedData);
-    writeEnvFile('.env', sharedData, {
-      comment: `Default 环境配置 (来自: ${sharedFiles.map(f => f.file).join(', ')}) - Keys: ${keys.length}`
-    });
+    writeEnvFile('.env', sharedData);
     generatedFiles.push({ file: '.env', env: 'default', keys: keys.length, sources: sharedFiles.map(f => f.file) });
   }
 
@@ -82,9 +80,7 @@ function generateEnvModeMulti(template, resourcesDir, varMappings) {
       const envFileName = `.env-${profile}`;
       const keys = Object.keys(envData).filter(k => !Object.keys(sharedData).includes(k));
       const allKeys = Object.keys(envData);
-      writeEnvFile(envFileName, envData, {
-        comment: `${profile.toUpperCase()} 环境配置 (来自: ${envSources.map(f => f.file).join(', ')}) - Keys: ${allKeys.length} (新增: ${keys.length})`
-      });
+      writeEnvFile(envFileName, envData);
       generatedFiles.push({ file: envFileName, env: profile, keys: allKeys.length, newKeys: keys.length, sources: envSources.map(f => f.file) });
     }
   }
@@ -116,18 +112,7 @@ function generateEnvModeSingle(template, resourcesDir, varMappings) {
   }
 
   if (Object.keys(allData).length > 0) {
-    // 构建注释
-    const commentLines = [];
-    for (const [env, keys] of Object.entries(envInfo)) {
-      const sourceFiles = Object.entries(template.files)
-        .filter(([, c]) => (c.profile || 'default') === env)
-        .map(([f]) => f);
-      commentLines.push(`${env.toUpperCase()}: ${keys.length} 个变量 (来自: ${sourceFiles.join(', ')})`);
-    }
-
-    writeEnvFile('.env', allData, {
-      comment: `统一环境配置\n${commentLines.join('\n')}`
-    });
+    writeEnvFile('.env', allData);
   }
 
   // 输出详细日志

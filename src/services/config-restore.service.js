@@ -12,7 +12,7 @@ const { parseYamlDocument, getScalarSnapshot, setScalarValue, stringifyDocument 
  * 还原配置值：将 ${VAR_NAME} 替换为原始明文值
  * @param {string|null} env - 指定环境，null 表示全部
  * @param {string} resourcesDir - 资源目录
- * @param {object} options - 选项 { dryRun: boolean }
+ * @param {object} options - 选项 { dryRun: boolean, file: string }
  * @returns {object} 操作结果
  */
 function restoreConfigValues(env, resourcesDir, options = {}) {
@@ -21,7 +21,8 @@ function restoreConfigValues(env, resourcesDir, options = {}) {
     throw new Error('manifest.json 不存在，请先运行 "envdog generate --replace"');
   }
 
-  const mappings = manifestService.getMappingsByEnv(env);
+  // 使用新的组合过滤方法
+  const mappings = manifestService.getMappingsByEnvAndFile(env, options.file);
   if (mappings.length === 0) {
     return { success: true, message: '没有需要还原的配置' };
   }
@@ -94,7 +95,7 @@ function restoreConfigValues(env, resourcesDir, options = {}) {
  * 保护配置值：将明文值替换为 ${VAR_NAME} 占位符
  * @param {string|null} env - 指定环境，null 表示全部
  * @param {string} resourcesDir - 资源目录
- * @param {object} options - 选项 { dryRun: boolean }
+ * @param {object} options - 选项 { dryRun: boolean, file: string }
  * @returns {object} 操作结果
  */
 function protectConfigValues(env, resourcesDir, options = {}) {
@@ -103,7 +104,8 @@ function protectConfigValues(env, resourcesDir, options = {}) {
     throw new Error('manifest.json 不存在，请先运行 "envdog generate --replace"');
   }
 
-  const mappings = manifestService.getMappingsByEnv(env);
+  // 使用新的组合过滤方法
+  const mappings = manifestService.getMappingsByEnvAndFile(env, options.file);
   if (mappings.length === 0) {
     return { success: true, message: '没有需要保护的配置' };
   }

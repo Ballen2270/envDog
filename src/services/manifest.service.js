@@ -157,6 +157,7 @@ function getMappingsByEnv(env) {
 
 /**
  * 根据文件过滤 mappings
+ * 自动从文件名解析对应的 profile (如 application-dev.yml → dev)
  * @param {string} file - 文件名
  * @returns {array}
  */
@@ -164,7 +165,53 @@ function getMappingsByFile(file) {
   const manifest = loadManifest();
   if (!manifest) return [];
 
-  return manifest.mappings.filter(m => m.file === file);
+  // 从文件名解析 profile
+  const profile = extractProfileFromFileName(file);
+
+  let mappings = manifest.mappings.filter(m => m.file === file);
+
+  // 如果指定了 profile，进一步过滤
+  if (profile) {
+    mappings = mappings.filter(m => m.profile === profile);
+  }
+
+  return mappings;
+}
+
+/**
+ * 根据环境和文件过滤 mappings
+ * @param {string|null} env - 环境名
+ * @param {string|null} file - 文件名
+ * @returns {array}
+ */
+function getMappingsByEnvAndFile(env, file) {
+  const manifest = loadManifest();
+  if (!manifest) return [];
+
+  let mappings = manifest.mappings;
+
+  // 按环境过滤
+  if (env) {
+    mappings = mappings.filter(m => m.profile === env);
+  }
+
+  // 按文件过滤
+  if (file) {
+    mappings = mappings.filter(m => m.file === file);
+  }
+
+  return mappings;
+}
+
+/**
+ * 从文件名解析 profile
+ * application-dev.yml → dev
+ * application-prod.yml → prod
+ * application.yml → null (无 profile)
+ */
+function extractProfileFromFileName(fileName) {
+  const match = fileName.match(/^application-(.+)\.ya?ml$/);
+  return match ? match[1] : null;
 }
 
 // 复用 config-parser 的工具函数
@@ -217,5 +264,7 @@ module.exports = {
   saveManifest,
   updateStatus,
   getMappingsByEnv,
-  getMappingsByFile
+  getMappingsByFile,
+  getMappingsByEnvAndFile,
+  extractProfileFromFileName
 };
