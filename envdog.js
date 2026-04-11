@@ -29,6 +29,8 @@ const configReplacer = require('./src/services/config-replacer.service');
 const manifestService = require('./src/services/manifest.service');
 const configRestore = require('./src/services/config-restore.service');
 const execService = require('./src/services/exec.service');
+const cryptoService = require('./src/services/crypto.service');
+const gitignoreService = require('./src/services/gitignore.service');
 
 const program = new Command();
 
@@ -87,8 +89,13 @@ async function runGenerateWorkflow(options) {
 
   console.log(`\n使用模板: ${template.name} (v${template.version})`);
 
-  // 备份原始文件（如果启用替换）
+  // 确保 .gitignore 包含敏感条目，并备份原始文件（如果启用替换）
   if (options.replace) {
+    const gitResult = gitignoreService.ensureGitignoreEntries();
+    if (gitResult.added.length > 0) {
+      console.log(`已自动追加 .gitignore 条目: ${gitResult.added.join(', ')}`);
+    }
+
     const allFiles = Object.keys(template.files);
     backupService.backupOriginalFiles(allFiles, resourcesDir);
   }
@@ -108,7 +115,7 @@ async function runGenerateWorkflow(options) {
     console.log('\n=== 生成 manifest ===\n');
     const manifest = manifestService.createManifest(template, resourcesDir, { mode: options.mode });
     manifestService.saveManifest(manifest);
-    console.log('manifest.json 已生成');
+    console.log('manifest.json 已生成（敏感值已加密）');
 
     console.log('\n=== 替换配置文件中的敏感值 ===\n');
     configReplacer.replaceConfigValuesV2(template, resourcesDir, varMappings, options.mode);
@@ -394,10 +401,12 @@ program
 
         if ((deleteAnswers.confirmed || '').trim().toLowerCase() === 'yes') {
           const templatePath = path.join(TEMPLATE_DIR, `${deleteAnswers.name}.json`);
+
           if (!fs.existsSync(templatePath)) {
             console.error(`错误: 模板不存在: ${deleteAnswers.name}`);
             return;
           }
+
           fs.unlinkSync(templatePath);
           console.log(`已删除模板: ${deleteAnswers.name}\n`);
         } else {
@@ -423,6 +432,7 @@ program
 // ============================================================
 // 命令: clear-backups
 // ============================================================
+
 program
   .command('clear-backups')
   .description('清除所有备份文件')
@@ -450,29 +460,24 @@ program
       process.exit(1);
     }
 
-    try {
-      const results = configRestore.restoreConfigValues(
-        options.env || null,
-        options.dir,
-        { dryRun: options.dryRun, file: options.file || null }
-      );
+    const results = configRestore.restoreConfigValues(
+      options.env || null,
+      options.dir,
+      { dryRun: options.dryRun, file: options.file || null }
+    );
 
-      if (results.restored && results.restored.length > 0) {
-        console.log(`\n已还原 ${results.restored.length} 个文件`);
-      }
-      if (results.skipped && results.skipped.length > 0) {
-        console.log(`\n跳过 ${results.skipped.length} 个文件（无变更）`);
-      }
-      if (results.errors && results.errors.length > 0) {
-        console.log(`\n错误:`);
-        results.errors.forEach(e => console.log(`  - ${e}`));
-      }
-
-      console.log('\n=== 完成 ===\n');
-    } catch (error) {
-      console.error('错误:', error.message);
-      process.exit(1);
+    if (results.restored && results.restored.length > 0) {
+      console.log(`\n已还原 ${results.restored.length} 个文件`);
     }
+    if (results.skipped && results.skipped.length > 0) {
+      console.log(`\n跳过 ${results.skipped.length} 个文件（无变更）`);
+    }
+    if (results.errors && results.errors.length > 0) {
+      console.log(`\n错误:`);
+      results.errors.forEach(e => console.log(`  - ${e}`));
+    }
+
+    console.log('\n=== 完成 ===\n');
   });
 
 // ============================================================
@@ -494,29 +499,24 @@ program
       process.exit(1);
     }
 
-    try {
-      const results = configRestore.protectConfigValues(
-        options.env || null,
-        options.dir,
-        { dryRun: options.dryRun, file: options.file || null }
-      );
+    const results = configRestore.protectConfigValues(
+      options.env || null,
+      options.dir,
+      { dryRun: options.dryRun, file: options.file || null }
+    );
 
-      if (results.protected && results.protected.length > 0) {
-        console.log(`\n已保护 ${results.protected.length} 个文件`);
-      }
-      if (results.skipped && results.skipped.length > 0) {
-        console.log(`\n跳过 ${results.skipped.length} 个文件（无变更）`);
-      }
-      if (results.errors && results.errors.length > 0) {
-        console.log(`\n错误:`);
-        results.errors.forEach(e => console.log(`  - ${e}`));
-      }
-
-      console.log('\n=== 完成 ===\n');
-    } catch (error) {
-      console.error('错误:', error.message);
-      process.exit(1);
+    if (results.protected && results.protected.length > 0) {
+      console.log(`\n已保护 ${results.protected.length} 个文件`);
     }
+    if (results.skipped && results.skipped.length > 0) {
+      console.log(`\n跳过 ${results.skipped.length} 个文件（无变更）`);
+    }
+    if (results.errors && results.errors.length > 0) {
+      console.log(`\n错误:`);
+      results.errors.forEach(e => console.log(`  - ${e}`));
+    }
+
+    console.log('\n=== 完成 ===\n');
   });
 
 // ============================================================
@@ -528,14 +528,11 @@ program
   .action(() => {
     console.log('\n=== envdog 当前状态 ===\n');
 
-    // 模板信息
     const templates = templateService.listTemplates();
     if (templates.length > 0) {
       try {
         const template = templateService.loadNamedTemplate(templates[0]);
         console.log(`模板版本: v${template.version}`);
-
-        // 提取所有环境
         const envSet = new Set();
         for (const fileConfig of Object.values(template.files || {})) {
           envSet.add(fileConfig.profile || 'default');
@@ -548,7 +545,6 @@ program
       console.log('模板文件不存在');
     }
 
-    // 环境变量文件
     console.log('\n已生成的文件:');
     const envFiles = fs.readdirSync('.').filter(f => f.match(/^\.env(-.*)?$/) && f !== BACKUP_DIR);
     if (envFiles.length > 0) {
@@ -557,7 +553,6 @@ program
       console.log('  (无)');
     }
 
-    // 备份文件
     const backupFiles = backupService.listBackupFiles();
     console.log(`\n备份文件: ${backupFiles.length} 个 (位于 ${BACKUP_DIR}/)`);
     if (backupFiles.length > 0) {
@@ -567,106 +562,83 @@ program
       }
     }
 
-    // Manifest 状态
     const manifest = manifestService.loadManifest();
     if (manifest) {
       console.log(`\n配置文件状态: ${manifest.status}`);
     }
 
+    console.log('\n密钥状态:');
+    if (cryptoService.hasKey()) {
+      console.log('  主密钥: 已存在');
+    } else {
+      console.log('  主密钥: 未生成（首次使用时自动生成）');
+    }
+
     console.log('');
   });
 
 // ============================================================
-// 命令: exec
+// 命令: exec - 安全加载环境变量执行命令
 // ============================================================
 program
-  .command('exec [args...]')
-  .description('安全加载 .env 变量并执行命令（解决 source .env 时 & 字符报错问题）')
-  .option('-e, --env-file <path>', '指定 .env 文件路径', '.env')
-  .option('--verbose', '输出变量列表（脱敏）')
-  .option('--dry-run', '预览模式，不实际执行')
-  .action(async (args, options) => {
-    const envFilePath = options.envFile || '.env';
-    const command = args.join(' ');
-
-    if (!command) {
-      console.error('错误: 请指定要执行的命令');
-      console.log('用法: envdog exec -- <command>');
-      console.log('示例: envdog exec -- mvn mybatis-generator:generate');
-      process.exit(1);
-    }
-
+  .command('exec <command>')
+  .description('加载 .env 文件中的环境变量并执行命令')
+  .option('-e, --env <env>', '指定环境', '')
+  .option('-d, --dir <path>', '资源目录路径', DEFAULT_RESOURCES_DIR)
+  .action(async (command, options) => {
     try {
-      if (options.dryRun) {
-        execService.execWithEnvDryRun(command, envFilePath, { verbose: !!options.verbose });
-      } else {
-        const exitCode = await execService.execWithEnv(command, envFilePath, { verbose: !!options.verbose });
-        process.exit(exitCode);
-      }
+      await execService.execWithEnv(command, options.env, options.dir);
     } catch (error) {
-      console.error('错误:', error.message);
+      console.error('执行错误:', error.message);
       process.exit(1);
     }
   });
 
 // ============================================================
-// 命令: template
+// 命令: crypto-key - 密钥管理
 // ============================================================
-const templateCmd = program
-  .command('template')
-  .description('模板管理');
-
-// template list
-templateCmd
-  .command('list')
-  .description('列出所有模板')
-  .action(() => {
-    const templates = templateService.listTemplates();
-    console.log('\n=== 可用模板 ===\n');
-    if (templates.length === 0) {
-      console.log('(无)');
-    } else {
-      templates.forEach(t => console.log(`  - ${t}`));
+program
+  .command('crypto-key')
+  .description('管理加解密密钥')
+  .option('--export', '导出当前密钥')
+  .option('--import <key>', '导入密钥（64位十六进制字符串）')
+  .option('--status', '查看密钥状态')
+  .action((options) => {
+    if (options.export) {
+      const key = cryptoService.exportKey();
+      if (key) {
+        console.log(`\n当前密钥:\n${key}\n`);
+        console.log('请妥善保管此密钥，切勿提交到版本控制');
+      } else {
+        console.log('\n密钥尚未生成，首次使用 encrypt/decrypt 时自动生成\n');
+      }
+      return;
     }
-    console.log('');
-  });
 
-// template delete
-templateCmd
-  .command('delete <name>')
-  .description('删除模板')
-  .action(async (name) => {
-    try {
-      const templatePath = path.join(TEMPLATE_DIR, `${name}.json`);
-      if (!fs.existsSync(templatePath)) {
-        console.error(`错误: 模板不存在: ${name}`);
+    if (options.import) {
+      try {
+        cryptoService.importKey(options.import);
+        console.log('\n密钥导入成功\n');
+      } catch (e) {
+        console.error(`\n导入失败: ${e.message}\n`);
         process.exit(1);
       }
-
-      const { confirmed } = await promptWithEscCancel([
-        {
-          type: 'input',
-          name: 'confirmed',
-          message: `确定要删除模板 "${name}" 吗？(输入 "yes" 确认): `,
-          default: 'no'
-        }
-      ]);
-
-      if (confirmed.trim().toLowerCase() === 'yes') {
-        fs.unlinkSync(templatePath);
-        console.log(`已删除模板: ${name}`);
-      } else {
-        console.log('已取消删除操作');
-      }
-      console.log('');
-    } catch (error) {
-      if (isEscCancelError(error)) {
-        console.log('\n操作已取消\n');
-        return;
-      }
-      console.error('错误:', error.message);
-      process.exit(1);
+      return;
     }
+
+    if (options.status) {
+      if (cryptoService.hasKey()) {
+        console.log('\n密钥状态: 已存在\n');
+      } else {
+        console.log('\n密钥状态: 未生成（首次使用时自动生成）\n');
+      }
+      return;
+    }
+
+    console.log('\n用法:');
+    console.log('  envdog crypto-key --export       导出密钥');
+    console.log('  envdog crypto-key --import <key>  导入密钥');
+    console.log('  envdog crypto-key --status        查看状态\n');
   });
 
 program.parse();

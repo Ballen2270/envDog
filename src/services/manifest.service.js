@@ -1,12 +1,14 @@
 /**
  * Manifest 服务模块
  * 负责管理替换映射清单，确保 restore/protect 的可逆性
+ * originalValue 字段在持久化时自动加密，加载时自动解密
  */
 const fs = require('fs');
 const path = require('path');
 const { ENV_DOG_DIR } = require('../constants');
 const { resolveVarName } = require('../core/naming');
 const { parseYamlDocument, getScalarSnapshot } = require('../core/yaml-doc');
+const crypto = require('./crypto.service');
 
 const MANIFEST_FILE = '.envdog/manifest.json';
 
@@ -101,7 +103,7 @@ function createManifest(template, resourcesDir, options = {}) {
 }
 
 /**
- * 加载 manifest
+ * 加载 manifest，自动解密 originalValue
  * @returns {object|null}
  */
 function loadManifest() {
@@ -109,7 +111,15 @@ function loadManifest() {
     return null;
   }
   try {
-    return JSON.parse(fs.readFileSync(MANIFEST_FILE, 'utf-8'));
+    const raw = JSON.parse(fs.readFileSync(MANIFEST_FILE, 'utf-8'));
+    if (raw && Array.isArray(raw.mappings)) {
+      for (const m of raw.mappings) {
+        if (m.originalValue !== undefined && m.originalValue !== null) {
+          m.originalValue = crypto.decrypt(String(m.originalValue));
+        }
+      }
+    }
+    return raw;
   } catch (e) {
     console.error('Manifest 文件解析失败:', e.message);
     return null;
@@ -117,7 +127,7 @@ function loadManifest() {
 }
 
 /**
- * 保存 manifest
+ * 保存 manifest，自动加密 originalValue
  * @param {object} manifest
  */
 function saveManifest(manifest) {
@@ -125,7 +135,18 @@ function saveManifest(manifest) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(MANIFEST_FILE, JSON.stringify(manifest, null, 2), 'utf-8');
+
+  crypto.ensureKey();
+
+  const toSave = JSON.parse(JSON.stringify(manifest));
+  if (toSave && Array.isArray(toSave.mappings)) {
+    for (const m of toSave.mappings) {
+      if (m.originalValue !== undefined && m.originalValue !== null) {
+        m.originalValue = crypto.encrypt(String(m.originalValue));
+      }
+    }
+  }
+  fs.writeFileSync(MANIFEST_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
 }
 
 
@@ -165,12 +186,10 @@ function getMappingsByFile(file) {
   const manifest = loadManifest();
   if (!manifest) return [];
 
-  // 从文件名解析 profile
   const profile = extractProfileFromFileName(file);
 
   let mappings = manifest.mappings.filter(m => m.file === file);
 
-  // 如果指定了 profile，进一步过滤
   if (profile) {
     mappings = mappings.filter(m => m.profile === profile);
   }
@@ -190,12 +209,10 @@ function getMappingsByEnvAndFile(env, file) {
 
   let mappings = manifest.mappings;
 
-  // 按环境过滤
   if (env) {
     mappings = mappings.filter(m => m.profile === env);
   }
 
-  // 按文件过滤
   if (file) {
     mappings = mappings.filter(m => m.file === file);
   }
@@ -214,7 +231,6 @@ function extractProfileFromFileName(fileName) {
   return match ? match[1] : null;
 }
 
-// 复用 config-parser 的工具函数
 function loadConfigByExt(filePath) {
   if (!fs.existsSync(filePath)) return null;
 
