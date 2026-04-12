@@ -1,18 +1,18 @@
 /**
  * 加密服务模块
  * 使用 AES-256-GCM 对 manifest 中的敏感值进行加解密
- * 密钥自动生成并存储在本地机器上
+ * 密钥自动生成并存储在用户 home 目录下，同台机器所有项目共享
  */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { ENV_DOG_DIR } = require('../constants');
+const os = require('os');
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
-const KEY_FILE = path.join(ENV_DOG_DIR, '.master-key');
+const KEY_FILE = path.join(os.homedir(), '.envdog', '.master-key');
 
 const CRYPTO_PREFIX = 'envdog:v1:';
 
