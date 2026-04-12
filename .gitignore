@@ -147,3 +147,4 @@ test
 .envdog
 .agents
 AGENTS.MD
+__tests__
